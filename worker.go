@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"git.resultys.com.br/lib/lower/promise"
+	_time "git.resultys.com.br/lib/lower/time"
 	"git.resultys.com.br/motor/models/token"
 	"git.resultys.com.br/motor/service"
 )
@@ -14,6 +15,8 @@ import (
 type Worker struct {
 	services []service.Service
 	running  map[string]*service.Unit
+
+	timeout int
 
 	mutex *sync.Mutex
 }
@@ -25,7 +28,16 @@ func New() *Worker {
 	w.mutex = &sync.Mutex{}
 	w.services = []service.Service{}
 
+	w.timeout = 0
+
 	w.running = make(map[string]*service.Unit)
+
+	return w
+}
+
+// SetTimeout ...
+func (w *Worker) SetTimeout(t int) *Worker {
+	w.timeout = t
 
 	return w
 }
@@ -55,7 +67,19 @@ func (w *Worker) Run(unit *service.Unit) *promise.Promise {
 	w.addUnit(unit)
 	w.unlock()
 
-	w.runServices(0, unit)
+	handler := _time.Timeout(w.timeout, func() {
+		w.lock()
+		isProcessing := w.existUnit(unit)
+		w.unlock()
+
+		if isProcessing {
+			unit.Promise.Reject("timeout")
+		}
+	})
+
+	w.runServices(0, unit, func() {
+		handler.Clear()
+	})
 
 	return unit.Promise
 }
@@ -108,7 +132,7 @@ func (w *Worker) Stats() {
 }
 
 // ------------- PRIVATE FUNCTIONS -------------------------------
-func (w *Worker) runServices(start int, unit *service.Unit) {
+func (w *Worker) runServices(start int, unit *service.Unit, done func()) {
 	totalServices := len(w.services)
 	totalAlloc := 0
 	i := start
@@ -122,6 +146,8 @@ func (w *Worker) runServices(start int, unit *service.Unit) {
 	}
 
 	if i > totalServices {
+		done()
+
 		w.removeUnit(unit)
 		unit.Promise.Resolve(unit)
 
@@ -130,7 +156,7 @@ func (w *Worker) runServices(start int, unit *service.Unit) {
 
 	unit.Alloc(totalAlloc)
 	unit.Done(func(unit *service.Unit) {
-		w.runServices(i+1, unit)
+		w.runServices(i+1, unit, done)
 	})
 
 	totalServices = start + totalAlloc
