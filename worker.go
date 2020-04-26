@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"git.resultys.com.br/lib/lower/promise"
-	_time "git.resultys.com.br/lib/lower/time"
+	"git.resultys.com.br/lib/lower/time/interval"
 	"git.resultys.com.br/motor/models/token"
 	"git.resultys.com.br/motor/service"
+	"git.resultys.com.br/motor/worker/hook"
 )
 
 // Worker struct
@@ -16,19 +16,23 @@ type Worker struct {
 	services []service.Service
 	running  map[string]*service.Unit
 
+	unitID int
+	hook   *hook.Hook
+
 	timeout int
 
 	mutex *sync.Mutex
 }
 
 // New ...
-func New() *Worker {
+func New(timeout int) *Worker {
 	w := &Worker{}
 
 	w.mutex = &sync.Mutex{}
 	w.services = []service.Service{}
+	w.hook = hook.New()
 
-	w.timeout = 0
+	w.timeout = timeout
 
 	w.running = make(map[string]*service.Unit)
 
@@ -57,31 +61,56 @@ func (w *Worker) Wait() *Worker {
 }
 
 // Run ...
-func (w *Worker) Run(unit *service.Unit) *promise.Promise {
+func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*service.Unit), timeout func(*service.Unit)) *Worker {
 	w.lock()
 	if w.existUnit(unit) {
+		unit = w.getUnit(unit.Token)
+		w.hook.On("ok:"+unit.GetUUID(), ok)
+		w.hook.On("timeout:"+unit.GetUUID(), timeout)
+
 		w.unlock()
-		return w.getUnit(unit.Token).Promise
+		return w
 	}
+
+	w.unitID++
+	unit.ID = w.unitID
+
+	w.hook.On("ok:"+unit.GetUUID(), ok)
+	w.hook.On("once:"+unit.GetUUID(), once)
+	w.hook.On("timeout:"+unit.GetUUID(), timeout)
 
 	w.addUnit(unit)
 	w.unlock()
 
-	handler := _time.Timeout(w.timeout, func() {
+	interval := interval.New().Repeat(w.timeout, func() {
 		w.lock()
+		defer w.unlock()
+
 		isProcessing := w.existUnit(unit)
-		w.unlock()
 
 		if isProcessing {
-			unit.Promise.Reject("timeout")
+			w.hook.Trigger("timeout:"+unit.GetUUID(), unit)
+			w.hook.Off("ok:" + unit.GetUUID())
+			w.hook.Off("timeout:" + unit.GetUUID())
 		}
 	})
 
 	w.runServices(0, unit, func() {
-		handler.Clear()
+		interval.Clear()
+
+		w.lock()
+		defer w.unlock()
+
+		w.removeUnit(unit)
+		w.hook.Trigger("ok:"+unit.GetUUID(), unit)
+		w.hook.Trigger("once:"+unit.GetUUID(), unit)
+
+		w.hook.Off("ok:" + unit.GetUUID())
+		w.hook.Off("once:" + unit.GetUUID())
+		w.hook.Off("timeout:" + unit.GetUUID())
 	})
 
-	return unit.Promise
+	return w
 }
 
 // Exist ...
@@ -147,10 +176,6 @@ func (w *Worker) runServices(start int, unit *service.Unit, done func()) {
 
 	if i > totalServices {
 		done()
-
-		w.removeUnit(unit)
-		unit.Promise.Resolve(unit)
-
 		return
 	}
 
@@ -184,9 +209,7 @@ func (w *Worker) addUnit(unit *service.Unit) {
 }
 
 func (w *Worker) removeUnit(unit *service.Unit) {
-	w.lock()
 	delete(w.running, unit.Token.ID)
-	w.unlock()
 }
 
 func (w *Worker) lock() {
