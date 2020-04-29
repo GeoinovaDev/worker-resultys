@@ -160,6 +160,20 @@ func (w *Worker) Stats() {
 	fmt.Println("TEMPO TOTAL ROUTINES = ", elapsed)
 }
 
+// Running ...
+func (w *Worker) Running() []*service.Unit {
+	arr := []*service.Unit{}
+
+	w.lock()
+	defer w.unlock()
+
+	for name := range w.running {
+		arr = append(arr, w.running[name])
+	}
+
+	return arr
+}
+
 // ------------- PRIVATE FUNCTIONS -------------------------------
 func (w *Worker) runServices(start int, unit *service.Unit, done func()) {
 	totalServices := len(w.services)
