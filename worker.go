@@ -65,6 +65,8 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	w.mutex.Lock()
 	if w.existUnit(unit) {
 		unit = w.getUnit(unit.Token)
+		unit.Tag = "Update Wait"
+
 		w.hook.On("ok:"+unit.GetUUID(), ok)
 		w.hook.On("timeout:"+unit.GetUUID(), timeout)
 
@@ -74,6 +76,7 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 
 	w.unitID++
 	unit.ID = w.unitID
+	unit.Tag = "New Wait"
 
 	w.hook.On("ok:"+unit.GetUUID(), ok)
 	w.hook.On("once:"+unit.GetUUID(), once)
@@ -83,12 +86,14 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	w.mutex.Unlock()
 
 	interval := interval.New().Repeat(w.timeout, func() {
+		unit.Tag = "Enter Timeout"
 		w.mutex.Lock()
 		defer w.mutex.Unlock()
 
 		isProcessing := w.existUnit(unit)
 
 		if isProcessing {
+			unit.Tag = "Trigger Timeout"
 			w.hook.Trigger("timeout:"+unit.GetUUID(), unit)
 			w.hook.Off("ok:" + unit.GetUUID())
 			w.hook.Off("timeout:" + unit.GetUUID())
@@ -96,8 +101,11 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	})
 
 	w.runServices(0, unit, func() {
+		unit.Tag = "Enter Done"
+
 		w.mutex.Lock()
 		defer w.mutex.Unlock()
+		unit.Tag = "Trigger Done"
 
 		interval.Clear()
 
@@ -189,7 +197,7 @@ func (w *Worker) runServices(start int, unit *service.Unit, done func()) {
 	}
 
 	if i > totalServices {
-		done()
+		go done()
 		return
 	}
 
