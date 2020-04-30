@@ -62,13 +62,13 @@ func (w *Worker) Wait() *Worker {
 
 // Run ...
 func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*service.Unit), timeout func(*service.Unit)) *Worker {
-	w.lock()
+	w.mutex.Lock()
 	if w.existUnit(unit) {
 		unit = w.getUnit(unit.Token)
 		w.hook.On("ok:"+unit.GetUUID(), ok)
 		w.hook.On("timeout:"+unit.GetUUID(), timeout)
 
-		w.unlock()
+		w.mutex.Unlock()
 		return w
 	}
 
@@ -80,11 +80,11 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	w.hook.On("timeout:"+unit.GetUUID(), timeout)
 
 	w.addUnit(unit)
-	w.unlock()
+	w.mutex.Unlock()
 
 	interval := interval.New().Repeat(w.timeout, func() {
-		w.lock()
-		defer w.unlock()
+		w.mutex.Lock()
+		defer w.mutex.Unlock()
 
 		isProcessing := w.existUnit(unit)
 
@@ -96,10 +96,10 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	})
 
 	w.runServices(0, unit, func() {
-		interval.Clear()
+		w.mutex.Lock()
+		defer w.mutex.Unlock()
 
-		w.lock()
-		defer w.unlock()
+		interval.Clear()
 
 		w.removeUnit(unit)
 		w.hook.Trigger("ok:"+unit.GetUUID(), unit)
@@ -115,9 +115,9 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 
 // Exist ...
 func (w *Worker) Exist(unit *service.Unit) bool {
-	w.lock()
+	w.mutex.Lock()
 	u := w.getUnit(unit.Token)
-	w.unlock()
+	w.mutex.Unlock()
 
 	return u != nil
 }
@@ -164,8 +164,8 @@ func (w *Worker) Stats() {
 func (w *Worker) Running() []*service.Unit {
 	arr := []*service.Unit{}
 
-	w.lock()
-	defer w.unlock()
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
 
 	for name := range w.running {
 		arr = append(arr, w.running[name])
@@ -224,12 +224,4 @@ func (w *Worker) addUnit(unit *service.Unit) {
 
 func (w *Worker) removeUnit(unit *service.Unit) {
 	delete(w.running, unit.Token.ID)
-}
-
-func (w *Worker) lock() {
-	w.mutex.Lock()
-}
-
-func (w *Worker) unlock() {
-	w.mutex.Unlock()
 }
