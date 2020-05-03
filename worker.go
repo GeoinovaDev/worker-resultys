@@ -86,14 +86,12 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	w.mutex.Unlock()
 
 	interval := interval.New().Repeat(w.timeout, func() {
-		unit.Tag = "Enter Timeout"
 		w.mutex.Lock()
 		defer w.mutex.Unlock()
 
 		isProcessing := w.existUnit(unit)
 
 		if isProcessing {
-			unit.Tag = "Trigger Timeout"
 			w.hook.Trigger("timeout:"+unit.GetUUID(), unit)
 			w.hook.Off("ok:" + unit.GetUUID())
 			w.hook.Off("timeout:" + unit.GetUUID())
@@ -101,11 +99,8 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	})
 
 	w.runServices(0, unit, func() {
-		unit.Tag = "Enter Done"
-
 		w.mutex.Lock()
 		defer w.mutex.Unlock()
-		unit.Tag = "Trigger Done"
 
 		interval.Clear()
 
@@ -172,8 +167,8 @@ func (w *Worker) Stats() {
 func (w *Worker) Running() []*service.Unit {
 	arr := []*service.Unit{}
 
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
+	// w.mutex.Lock()
+	// defer w.mutex.Unlock()
 
 	for name := range w.running {
 		arr = append(arr, w.running[name])
