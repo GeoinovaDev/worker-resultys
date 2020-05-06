@@ -9,6 +9,7 @@ import (
 	"git.resultys.com.br/motor/models/token"
 	"git.resultys.com.br/motor/service"
 	"git.resultys.com.br/motor/worker/hook"
+	"git.resultys.com.br/motor/worker/queue"
 )
 
 // Worker struct
@@ -18,6 +19,8 @@ type Worker struct {
 
 	unitID int
 	hook   *hook.Hook
+
+	waitQueue *queue.Queue
 
 	timeout int
 
@@ -31,6 +34,7 @@ func New(timeout int) *Worker {
 	w.mutex = &sync.Mutex{}
 	w.services = []service.Service{}
 	w.hook = hook.New()
+	w.waitQueue = queue.New()
 
 	w.timeout = timeout
 
@@ -61,15 +65,14 @@ func (w *Worker) Wait() *Worker {
 }
 
 // Run ...
-func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*service.Unit), timeout func(*service.Unit)) *Worker {
+func (w *Worker) Run(unit *service.Unit, fnOnce func(*service.Unit), fnOk func(*service.Unit), fnTimeout func(*service.Unit)) *Worker {
 	w.mutex.Lock()
 	if w.existUnit(unit) {
-		unit = w.getUnit(unit.Token)
-		unit.Processing++
-		unit.SetStatus("Update Wait")
+		_unit := w.getUnit(unit.Token)
+		_unit.Processing++
+		_unit.SetStatus("Update Wait")
 
-		w.hook.On("ok:"+unit.GetUUID(), ok)
-		w.hook.On("timeout:"+unit.GetUUID(), timeout)
+		w.waitQueue.Add(_unit.ID, unit)
 
 		w.mutex.Unlock()
 		return w
@@ -80,9 +83,7 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 	unit.Processing++
 	unit.SetStatus("New Wait")
 
-	w.hook.On("ok:"+unit.GetUUID(), ok)
-	w.hook.On("once:"+unit.GetUUID(), once)
-	w.hook.On("timeout:"+unit.GetUUID(), timeout)
+	w.waitQueue.Add(unit.ID, unit)
 
 	w.addUnit(unit)
 	w.mutex.Unlock()
@@ -97,9 +98,8 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 
 		if isProcessing {
 			unit.SetStatus("Interval Dispatch")
-			w.hook.Trigger("timeout:"+unit.GetUUID(), unit)
-			w.hook.Off("ok:" + unit.GetUUID())
-			w.hook.Off("timeout:" + unit.GetUUID())
+			w.invoke(fnTimeout, unit)
+			w.waitQueue.Clear(unit.ID)
 		}
 
 		unit.SetStatus("Finish Interval")
@@ -111,14 +111,13 @@ func (w *Worker) Run(unit *service.Unit, once func(*service.Unit), ok func(*serv
 		defer w.mutex.Unlock()
 
 		interval.Clear()
-
 		w.removeUnit(unit)
-		w.hook.Trigger("ok:"+unit.GetUUID(), unit)
-		w.hook.Trigger("once:"+unit.GetUUID(), unit)
 
-		w.hook.Off("ok:" + unit.GetUUID())
-		w.hook.Off("once:" + unit.GetUUID())
-		w.hook.Off("timeout:" + unit.GetUUID())
+		fnOnce(unit)
+
+		w.invoke(fnOk, unit)
+		w.waitQueue.Remove(unit.ID)
+
 		unit.SetStatus("Finish Release")
 	})
 
@@ -236,4 +235,22 @@ func (w *Worker) addUnit(unit *service.Unit) {
 
 func (w *Worker) removeUnit(unit *service.Unit) {
 	delete(w.running, unit.Token.ID)
+}
+
+func (w *Worker) invoke(fn func(*service.Unit), unit *service.Unit) {
+	units := w.waitQueue.Get(unit.ID)
+	tokenID := unit.Token.TokenID
+	webhook := unit.Token.Webhook
+	webhookdID := unit.Token.WebhookID
+
+	for i := 0; i < len(units); i++ {
+		unit.Token.TokenID = units[i].Token.TokenID
+		unit.Token.Webhook = units[i].Token.Webhook
+		unit.Token.WebhookID = units[i].Token.WebhookID
+		fn(unit)
+	}
+
+	unit.Token.TokenID = tokenID
+	unit.Token.Webhook = webhook
+	unit.Token.WebhookID = webhookdID
 }
