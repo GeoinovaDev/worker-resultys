@@ -107,18 +107,17 @@ func (w *Worker) Run(unit *service.Unit, fnOnce func(*service.Unit), fnOk func(*
 
 	w.runServices(0, unit, func() {
 		unit.SetStatus("Start Release")
-		w.mutex.Lock()
-		defer w.mutex.Unlock()
 
+		w.mutex.Lock()
 		interval.Clear()
 		w.removeUnit(unit)
-
-		fnOnce(unit)
-
 		w.invoke(fnOk, unit)
 		w.waitQueue.Remove(unit.ID)
+		w.mutex.Unlock()
 
 		unit.SetStatus("Finish Release")
+
+		fnOnce(unit)
 	})
 
 	return w
