@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"git.resultys.com.br/lib/lower/time/interval"
-	"git.resultys.com.br/motor/models/token"
-	"git.resultys.com.br/motor/service"
-	"git.resultys.com.br/motor/worker/hook"
-	"git.resultys.com.br/motor/worker/queue"
+	"github.com/GeoinovaDev/lower-resultys/time/interval"
+	"github.com/GeoinovaDev/models-resultys/token"
+	"github.com/GeoinovaDev/service-resultys"
+	"github.com/GeoinovaDev/worker-resultys/hook"
+	"github.com/GeoinovaDev/worker-resultys/queue"
 )
 
 // Worker struct
