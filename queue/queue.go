@@ -1,6 +1,6 @@
 package queue
 
-import "git.resultys.com.br/motor/service"
+import "github.com/GeoinovaDev/service-resultys"
 
 // Queue ...
 type Queue struct {
